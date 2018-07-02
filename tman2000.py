@@ -1,232 +1,202 @@
 import requests
 import os
+from sys import argv,exit
 import logging
 import yaml
 
+######## Settings #############################################################################################>
 
 URL = "http://<URL>"
 TOKEN = os.getenv('ART_TOKEN')
 SETTINGS = './test.yaml'
 REPO_TYPES = {"pypi", "docker", "generic", "rpm"}
+
+#### Logger ####
 FORMAT = '%(asctime)s %(funcName)s %(levelname)s:   %(message)s'
-headers = {'X-JFrog-Art-Api' : TOKEN}
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
-def existsException(rtype=""):
-    try:
-        isinstance(rtype, str)
-    except Exception as error:
-        raise RuntimeWarning(rtype + " already exists !")
 
-class Client():
-    def __init__(self):
-        self.url = URL
-        self.token = TOKEN
+######## Settings #############################################################################################<
+
+class ACREATOR():
+    def __init__(self, token):
+        self.token = token
         self.headers = {'X-JFrog-Art-Api' : TOKEN}
 
 
-class Repo(Client):
-    ''' Repo creation class
+########## Checks #############################################################################################>
 
-        Attributes:
-            (self, rclass="local" *str, rtype="rpm" *str, rdesk="" *str, rnotes="" *str)
-    '''
-    def __init__(self,name,rclass="local", rtype="rpm", rdesk="", rnotes=""):
-        self.name = name
-        self.rclass = rclass
-        self.rtype = rtype
-        self.rdesk = rdesk
-        self.rnotes = rnotes
-        super(Repo, self).__init__()
+    def test(self, users=""):
+        return self.__user_check(users)
 
-    def __getStatus(self):
-        self.url = URL + 'repositories/' + self.name
-        req = requests.get(url=self.url, headers=self.headers)
+    # Checking if repos exists (rclass *str, repo_name *str), returns HTTP response code *int
+    def __rcheck(self, rclass, repo_name):
+        self.repo_name = repo_name
+        url = URL + 'repositories/' + repo_name
+        req = requests.get(url=url, headers=self.headers)
         return req.status_code
 
-    def isExists(self):
-        ''' Returns bool'''
-        return self.__getStatus() == 200
-
-    def create(self):
-        ''' Returns repo name *str'''
-        if self.isExists():
-            logging.warning("Repo %s already exists !", self.name)
-            return False
-        elif self.rtype not in REPO_TYPES:
-            raise Exception(self.rtype + " wrong repo type !")
-        else:
-            data = {'key':self.name, 'rclass':self.rclass, 'packageType':self.rtype, 'description':self.rdesk, 'notes':self.rnotes, 'propertySets':["artifactory"]}
-            req = requests.put(url=self.url, headers=self.headers, json=data)
-            if req.status_code == 200:
-                logging.info("Repo %s is created !", self.name)
-                logging.debug('%s', req.text)
-                return self.name
-            else:
-                raise Exception("Repo " + self.name + " can't be created !\n" + req.text)
-
-class Group(Client):
-    def __init__(self, name):
-        self.name = name
-        super(Group, self).__init__()
-
-    def __getStatus(self):
-        self.url = URL + 'security/groups/' + self.name
-        req = requests.get(url=self.url, headers=self.headers)
-        return req.status_code
-
-    def isExists(self):
-        return self.__getStatus() == 200
-
-    def create(self):
-        ''' Returns group name *str '''
-        if self.isExists():
-            logging.warning("Group %s already exists !", self.name)
-            return False
-        data = {'name':self.name, 'description':"", 'realm':"ARTIFACTORY"}
-        req = requests.put(url=self.url, headers=self.headers, json=data)
-        if req.status_code == 201:
-            logging.info("Group %s is created !", self.name)
-            logging.debug('%s', req.text)
-            return self.name
-        else:
-            raise Exception("Group " + self.name + " can't be created !\n" + req.text)
-
-class Permission(Client):
-    def __init__(self,name):
-        self.name = name
-        super(Permission, self).__init__()
-
-    def __getStatus(self):
-        self.url = URL + 'security/permissions/' + self.name
-        req = requests.get(url=self.url, headers=self.headers)
-        return req.status_code
-
-    def isExists(self):
-        return self.__getStatus() == 200
-
-    def create(self, repo):
-        ''' Returns permission name *str
-            Attributes:
-                repo *str - needed for permission assigning
-        '''
-        self.repo = repo
-        if self.isExists():
-            logging.warning("Permission %s already exists !", self.name)
-            return False
-        else:
-            data = {'name':self.name, 'repositories': [self.repo], 'principals' : {'groups' : {self.name : [ "r", "d", "w", "n" ]}}}
-            req = requests.put(url=self.url, headers=self.headers, json=data)
-            if req.status_code == 201:
-                logging.info("Permission %s is created !", self.name)
-                logging.debug('%s', req.text)
-                return self.name
-            else:
-                raise Exception("Permission " + self.name + " can't be created !\n" + req.text)
-
-class User(Client):
-    def __init__(self):
-        self.valid_users = {}
-        super(User, self).__init__()
-
-    def __validUsers(self, users):
+    # Checking if users exists (users *tuple), returns valid users hash {user:parameters}
+    def __user_check(self, users=""):
+        valid_users = {}
         for user in users:
             url = URL + 'security/users/' + user
             req = requests.get(url=url, headers=self.headers)
             if req.status_code == 200:
-                self.valid_users.update({user:dict(req.json())})
+                valid_users.update({user:dict(req.json())})
             else:
-                logging.info("%s doesn't exists !", user)
-                logging.debug('%s', req.text)
-        return self.valid_users
+                logging.warning(user + " doesn't exists !")
+        return valid_users
 
-    def isExists(self, user):
-        url = URL + 'security/users/' + user
+    # Checking if group exists (group *str), returns HTTP response code *int
+    def __group_check(self, group=""):
+        self.group = group
+        url = URL + 'security/groups/' + self.group
         req = requests.get(url=url, headers=self.headers)
-        return req.status_code == 200
+        return req.status_code
 
-    def create(self, user, ci=False, email="<EMAIL>"):
-        if self.isExists(user):
-            logging.warning("User %s already exists !", user)
-            return False
-        if ci:
-            user = user + "-ci"
-            data = {'name':user, "email":email, 'disableUIAccess': True, 'internalPasswordDisabled': True, 'groups': ["readers"]}
-        else:
-            data = {'name':user, "email":email, 'disableUIAccess': False, 'internalPasswordDisabled': False, 'groups': ["readers"]}
-        url = URL + 'security/users/' + user
-        req = requests.put(url=url, headers=self.headers, json=data)
-        if req.status_code == 201:
-            logging.info("%s is created !", user)
-            return user
-        else:
-            raise Exception(req.text)
+    # Checking if permissions exists (group *str), returns HTTP response code *int
+    def __perm_check(self, perm=""):
+        url = URL + 'security/permissions/' + perm
+        req = requests.get(url=url, headers=self.headers)
+        return req.status_code
 
-    def addToGroup(self, users, group):
-        for user, value in self.__validUsers(users).items():
-            value['groups'].append(group)
+########## Checks end #############################################################################################<
+    
+    # Creating repo after unless check has been done. Returns response text *str
+    def repo_create(self,repo_name, rclass="local", rtype="rpm", rdesk="", rnotes=""):
+        if self.__rcheck(rclass,repo_name) == 200:
+            logging.warning("Repo " + repo_name + " already exists !")
+            exit(0)
+        elif rtype not in REPO_TYPES:
+            logging.error("Wrong repository type !")
+        else:
+            data = {'key':repo_name, 'rclass':rclass, 'packageType':rtype, 'description':rdesk, 'notes':rnotes, 'propertySets':["artifactory"]}
+            url = URL + 'repositories/' + repo_name
+            req = requests.put(url=url, headers=self.headers, json=data)
+            if req.status_code == 200:
+                logging.info("Repo " + repo_name + " is created !")
+            else:
+                logging.error('%s', req.text)
+            return req.text
+
+    def user_assign(self, users):
+        for user, value in self.__user_check(users).items():
+            value['groups'].append(self.group)
+            logging.debug('Checking valid_users status ' + user)
             data = value
             url = URL + 'security/users/' + user
+            logging.debug('%s', value)
             req = requests.post(url=url, headers=self.headers, json=data)
             if req.status_code == 200:
-                logging.info("%s successfully added to group %s", user, group)
-                logging.debug('%s', req.text)
+                logging.info(user + " added to " + self.group)
             else:
-                logging.error("Can't add %s to %s", user, group)
+                logging.error("Some problems with " + user)
+                logging.error('%s', req.text)
         return True
 
-    def getToken(self, user):
-        if self.isExists(user):
+    def group_create(self, group=""):
+        if self.__group_check(group) == 200:
+            logging.warning("Group " + group + " already exists !")
+            exit(0)
+        else:
+            url = URL + 'security/groups/' + self.group
+            data = {'name':self.group, 'description':"", 'realm':"ARTIFACTORY"}
+            req = requests.put(url=url, headers=self.headers, json=data)
+            if req.status_code in (200, 201):
+                logging.info("Group " + group + " is created !")
+                return group
+            else:
+                logging.debug("Can't create a group " + str(data))
+                logging.error('%s', req.text)
+                exit(1)
+
+    def perm_create(self, perm):
+        if self.__perm_check(perm) == 200:
+            logging.warning(perm + " permission already exists")
+            exit(0)
+        else:
+            try:
+                isinstance(self.repo_name, str)
+            except TypeError:
+                print("Wrong variable type:" + self.repo_name)
+                exit(1)
+            data = {'name':perm, 'repositories': [self.repo_name], 'principals' : {'groups' : {self.group : [ "r", "d", "w", "n" ]}}}
+            url = URL + 'security/permissions/' + perm
+            logging.debug('%s', data)
+            req = requests.put(url=url, headers=self.headers, json=data)
+            if req.status_code in (200, 201):
+                logging.info("Permission is created " + perm)
+                return perm
+            else:
+                logging.debug("Can't create a premission " + str(data))
+                logging.error('%s', req.text)
+                exit(1)
+
+    def __token_getter(self, username):
             url = URL + 'security/token'
             headers = self.headers
             headers.update({'Content-Type': 'application/x-www-form-urlencoded'})
-            data = {'username':user}
+            data = {'username':self.ci_user}
             req = requests.post(url=url, headers=headers, data=data)
-            if req.status_code == 201:
-                logging.info("%s", req.text)
-                return req.json()['access_token']
-            elif req.status_code == 200:
-                logging.debug("%s", req.text)
-                return req.json()['access_token']
+            if req.status_code in (200,201):
+                return req.text
             else:
-                raise Exception(req.text)
-        else:
-            raise Exception(user + " doesn't exists !")
+                logging.error("Can't generate a token for " + self.ci_user)
+                logging.debug('%s', req.text)
+                return False
 
-'''
-User functions bellow
-'''
+    def ci_user_create(self):
+            self.ci_user = self.repo_name + "-ci"
+            url = URL + 'security/users/' + self.ci_user
+            data = {'name':self.ci_user, "email":"devnull@devnull.ru", 'disableUIAccess': True, 'internalPasswordDisabled': True, 'groups': [self.group]}
+            req = requests.put(url=url, headers=self.headers, json=data)
+            if req.status_code in (200, 201):
+                logging.info("CI user " + self.ci_user + " is created !")
+                token = {self.ci_user: self.__token_getter(self.ci_user)}
+                logging.info('%s', token)
+                return token
+            else:
+                logging.debug("Can't create CI user" + str(data))
+                logging.error('%s', req.text)
+                exit(1)
 
+###############################################################################################################<
+
+################################# User functions ##############################################################>
+
+def create_local_repo(repo_name, users, responsible="", ticket_id="", rtype="rpm", ci=False):
+    try:
+        isinstance(users, tuple)
+        isinstance(repo_name, str)
+    except TypeError:
+        print("Wrong variable type !")
+
+    new = ACREATOR(TOKEN)
+    new.repo_create(repo_name=repo_name, rdesk="Responsible: "+responsible, rnotes=ticket_id, rtype=rtype)
+    new.group_create(group=repo_name)
+    new.perm_create(perm=repo_name)
+    new.user_assign(users=users)
+    if ci == True:
+        new.ci_user_create()
+    return True
+
+# returns dict
 def settings_loader(settings_path="settings.yaml"):
     with open(settings_path) as settings:
         repos = yaml.safe_load(settings)
     return repos
 
-def createLocalRepo(name, users, responsible="", ticket_id="", rtype="rpm", ci=False):
-    repo = Repo(name=name, rtype=rtype, rdesk="Responsible: "+responsible, rnotes=ticket_id)
-    group = Group(name=name)
-    perm = Permission(name=name)
-    user = User()
-    try:
-        repo.create()
-        group.create()
-        perm.create(repo=name)
-        if ci:
-            ci_user = user.create(user=name, ci=True)
-            if ci_user:
-                users.append(ci_user)
-                user.addToGroup(users, name)
-                token = user.getToken(ci_user)
-            return {"Repo":name, "Group":name, "Permission":name, "User":ci_user, "Token":token}
-        return {"Repo":name, "Group":name, "Permission":name}
-    except Exception as err:
-        logging.error(err)
+################################# User functions ##############################################################<
 
 
 if __name__ == "__main__":
 
-    repo = settings_loader("test.yaml")
-    repo_name = next(iter(repo))
-    repo_values = repo[repo_name]
+    try:
+        repo = settings_loader()
+        repo_id = next(iter(repo))
+        repo_val = repo[repo_id]
+    except IOError:
+        logging.error("Can't open settings file")
 
-    logging.info(createLocalRepo(name=repo_name, users=repo_values['participants'], responsible=repo_values['responsible'], ticket_id=repo_values['ticket_id'], rtype=repo_values['repo_type'], ci=True))
+    create_local_repo(repo_name=repo_id, users=repo_val['participants'], responsible=repo_val['responsible'], ticket_id=repo_val['ticket_id'], rtype=repo_val['repo_type'], ci=True)
